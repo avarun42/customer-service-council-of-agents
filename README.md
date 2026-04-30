@@ -1,86 +1,137 @@
 # Customer Council
 
-**Sky Valley Intent Space hackathon entry.**
-
 Five autonomous agents running a customer-support ticket queue on
-[spacebase1.differ.ac](https://spacebase1.differ.ac), using only the
-intent-space protocol — no orchestrator, no router, no shared state
-besides the space itself.
+[spacebase1.differ.ac](https://spacebase1.differ.ac), coordinating
+exclusively through the intent-space protocol — append-only writes into
+a shared space, no orchestrator, no router, no topic subscriptions, no
+shared memory.
 
-## What it shows
+## The novel behavior
 
-The demo plays out inside a private shared space called **Lume Customer
-Support**, provisioned through the steward via PROMISE → ACCEPT → COMPLETE
-with all five agents listed as participant principals. The customer-intake
-agent (Mira) posts a ticket as a top-level INTENT in that space; the four
-specialist agents watch the same shared space and self-select work.
+**Two agents publicly disagree, then reach consensus, with no arbiter.**
 
-The interesting part isn't the linear handoff. It's the **dissent loop**:
+A specialist (Bex, billing) denies a customer's refund per policy. A
+peer (Cass, customer success) reads the same tree, decides retention
+risk outweighs the policy upside, and posts a counter-proposal as a
+sibling intent: "$10 goodwill credit instead." Bex's loop scans the
+ticket on its next cycle, sees Cass's reasoning, evaluates it, and
+**reverses her own decision** — posting a new `goodwill-credit-applied`
+intent that supersedes the earlier denial. Append-only consensus,
+emergent, with the entire decision trail visible to the judge.
 
-1. Mira (customer intake) drops a ticket with three asks: thread restore,
-   refund, cancellation.
-2. Bex (billing, strict ToS persona) cancels the subscription and **denies
-   the refund** with explicit policy reasoning.
-3. Cass (customer success) reads the whole tree, sees Bex's denial, and
-   **publicly disputes it** in a sibling intent — "retention risk, propose
-   a $10 goodwill credit instead."
-4. Bex's loop scans, sees the counter-proposal, the LLM evaluates the
-   trade-off, and **reverses her own decision**, posting a new
-   `goodwill-credit-applied` intent under the same ticket.
-5. Doro (data ops) has meanwhile flagged the thread restore as needing
-   privacy review; Pria (privacy) approves; Doro confirms restoration.
-6. Mira reads the final state and posts a thank-you.
+The reversal happens because:
 
-No agent was told who the other agents are. No code routes Cass's counter
-back to Bex. They both watch the same shared space. The reversal happens
-because Bex's persona allows reconsideration when a peer's reasoning is
-sound, and Bex's LLM call sees that reasoning right there in the tree.
+- both agents read the same shared space;
+- Bex's persona explicitly permits reconsideration when a peer's
+  reasoning is sound;
+- the LLM call that decides Bex's next action sees Cass's counter
+  argument right there in the prompt, alongside Bex's own prior denial.
+
+No code routes Cass's intent to Bex. No code says "if there is a
+retention objection, reconsider." The whole behavior is an emergent
+property of the persona prompts plus shared visibility plus the
+intent-space append-only model.
+
+## Observe it
+
+**The shared Lume Customer Support space (the demo surface):**
+
+https://spacebase1.differ.ac/observatory#origin=https%3A%2F%2Fspacebase1.differ.ac&space=space-4e45684f-3604-429d-b20b-bc71833db7be&token=SXmXFjbjKR-0t4n1AsK4S23o2_b4CHW5EvHa4xqwEZM
+
+Inside that space:
+
+- one top-level INTENT — the customer ticket
+- 11 child intents inside the ticket (every reply is itself a space)
+- the dissent → reversal occurs in the last three child intents
+
+Hackathon submission intent: `intent-136eaac9-bc6d-4afc-b4d2-ba319ac04096`
+(under `intent-413e0bc5-d8f3-40e7-afb4-350e220df03c` in commons).
+
+## The conversation
+
+The customer ticket reads:
+
+> "I want my deleted thread from 6 weeks ago restored. I want last
+> month's $20 subscription refunded. I want to cancel going forward.
+> I've been a paying customer for 4 years and this experience has been
+> awful."
+
+The 11 replies, in order, all posted as direct children of that one
+ticket intent:
+
+| # | kind | author | what it does |
+|---|---|---|---|
+| 1 | `data-pending-privacy` | Doro | flags the recovery as needing privacy review |
+| 2 | `cancellation` | Bex | confirms cancellation effective end-of-period |
+| 3 | `privacy-approval` | Pria | approves restoration with stated criteria (4-year tenure, specific request, low risk) |
+| 4 | `refund-denial` | Bex | denies the $20 refund per ToS, monthly non-refundable once started |
+| 5 | `customer-followup` | Mira | acknowledges the cancellation, presses on the refund |
+| 6 | `data-recovered` | Doro | posts the mock restored-thread URL after Pria's approval |
+| 7 | `retention-counter` | Cass | **publicly disputes Bex's denial**, proposes a $10 goodwill credit |
+| 8 | `refund-denial` (cont.) | Bex | restates the policy reasoning |
+| 9 | `customer-followup` | Mira | thanks Doro for the restore, holds firm on the refund |
+| 10 | `retention-counter` | Cass | **presses the counter-proposal a second time** |
+| 11 | `goodwill-credit-applied` | Bex | **reverses the earlier denial**, applies a $10 goodwill credit, names the intent that changed her mind |
+
+Every cell in the table corresponds to a real INTENT in the space with
+its full reasoning written into `payload.content` in plain English. The
+judge can read each one directly.
 
 ## Architecture
 
 ```
-spacebase1 commons
-  ├─ (each agent's commons enrollment lives here)
-  ├─ home-space steward presence intent
-  └─ private home space (per agent, claimed via PROMISE/ACCEPT/COMPLETE)
-       ├─ steward orientation intent
-       ├─ shared-space request intent  ← Mira posts this
-       │     ├─ steward PROMISE
-       │     ├─ Mira's ACCEPT
-       │     └─ steward COMPLETE  → returns shared_space_id + invitation_count
-       └─ invitation intent (one per participant, contains access creds)
+spacebase1
+ └ commons (public)
+    │
+    ├ home-space steward presence intent
+    │
+    └ for each council agent:
+       ├ agent's commons enrollment (per-agent RSA key, DPoP-bound station token)
+       ├ private home space, claimed via PROMISE → ACCEPT → COMPLETE with the steward
+       │  (steward returns claim_url + bind_url; agent POSTs signup-shaped body to bind_url
+       │   to bind its key into the new home space)
+       │
+       └ from Mira's home space:
+          shared-space request INTENT, payload includes
+            requestedSpace = { kind: "shared", participant_principals: [<5 principals>] }
+          steward PROMISE → Mira's ACCEPT → steward COMPLETE
+          steward also delivers an invitation INTENT into each participant's home space,
+            access creds inline (station_token, audience, itp_endpoint)
 
-Lume Customer Support (shared space)
-  └─ ticket: customer complaint  ← Mira posts top-level
-       ├─ data-pending-privacy            (Doro)
-       ├─ cancellation                    (Bex)
-       ├─ privacy-approval                (Pria)
-       ├─ refund-denial                   (Bex)
-       ├─ customer-followup               (Mira)
-       ├─ data-recovered                  (Doro)
-       ├─ retention-counter               (Cass)  ← public dissent
-       ├─ refund-denial (continuation)    (Bex)
-       ├─ customer-followup               (Mira)
-       ├─ retention-counter               (Cass)  ← pressing the point
-       └─ goodwill-credit-applied         (Bex)   ← consensus, reverses earlier denial
+space-4e45684f-3604-429d-b20b-bc71833db7be (the shared Lume Customer Support space)
+ └ ticket: customer complaint  ← Mira posts as top-level
+    └ 11 child intents (the table above)
 ```
 
-Every reply lives inside the ticket's interior — `parent_id = ticket_id` —
-because every intent is itself a space.
+Notable details:
 
-## How each agent works
+- **Per-agent keys.** Each of the five agents has its own 4096-bit RSA
+  keypair, its own commons enrollment, its own home space, and its own
+  station_token bound to the shared Lume space. Bex's DPoP proof on
+  every request is signed with Bex's key, not Mira's.
+- **Steward-driven provisioning.** The shared space wasn't created by
+  side-channel API call. It was provisioned through the protocol's
+  promise lifecycle, including the steward DECLINing the first attempt
+  with a machine-readable `reason` field — the spec working as designed.
+- **Two distinct invitation patterns.** The home steward returns
+  `bind_url` + `claim_token` (POST-to-bind). The shared steward returns
+  the access creds inline in the invitation INTENT (no bind step). The
+  code handles both.
+- **Capability is never declared.** No agent registers a "billing"
+  topic. Bex reads each ticket on each cycle and decides whether the
+  ticket is hers. Same for Doro, Pria, Cass.
 
-Identical loop, different persona. Defined in
-[`council/agent.py`](council/agent.py) and
-[`council/personas.py`](council/personas.py):
+## How an agent works
+
+[`council/agent.py`](council/agent.py), one loop, five personas:
 
 ```python
 while cycles_remaining:
-    queue_scan = session.scan_full(LUME_SPACE_ID)        # see every ticket
-    for ticket in queue_scan.tickets:
-        seed = find_seed(ticket)                          # the original complaint
-        replies = session.scan_full(ticket.id)            # current state of the ticket
-        decision = llm(persona + seed + replies)          # post or skip?
+    queue = session.scan_full(LUME_SPACE_ID)            # see every ticket
+    for ticket in queue.intents:
+        seed   = find_seed(ticket)                       # original complaint text
+        replies = session.scan_full(ticket.id)           # current state
+        decision = llm(persona + seed + replies)         # post or skip?
         if decision.action == "post":
             session.post(intent(decision.content,
                                 parent_id=ticket.id,
@@ -88,110 +139,71 @@ while cycles_remaining:
     sleep(jitter)
 ```
 
-Notes:
+- `scan_full` is used (not the cursor-advancing `scan`) because each
+  decision needs the complete current state to avoid duplicating prior
+  work.
+- All reasoning is posted **into the intent content** in plain English,
+  by design, so the tree itself is the artifact the judge reads.
+- The decision is an LLM call with the persona, the seed, and the
+  current replies as context. The same agent code runs five times with
+  different persona blocks ([`council/personas.py`](council/personas.py)).
+- The cycle limit caps any waste from over-engagement; the LLM-decided
+  skip path covers the rest.
 
-- All reasoning is posted **inside the intent content** in plain English so
-  the judge agent can read it. Nothing is buried in process state.
-- Engagement is decided by the LLM, not by a hardcoded `kind` match. Bex's
-  persona says "engage with billing-related stuff" — she reads the ticket
-  and decides.
-- The cycle is `scan_full` not `scan` so each LLM call sees the complete
-  current state and can avoid duplicating work.
-- Per-agent keys: each agent has its own RSA keypair and its own
-  station_token bound to it. The shared-space station_token Bex uses is
-  different from Mira's, even though both audiences are the same Lume
-  space.
+## Why the protocol shape made this possible
+
+This demo could not be built as a triage-then-dispatch orchestrator
+because:
+
+- There is no central process deciding who handles what. Removing the
+  runner is fine; the agents work the same way once they're up.
+- The reversal needs Bex to read Cass's reasoning. In a queue-based
+  routing system that's a separate channel and explicit message-passing.
+  Here it's just `scan_full(ticket_id)` — same primitive Bex used to
+  decide her original action.
+- Adding a sixth agent (e.g. a Town Crier persona, which is defined in
+  [`council/personas.py`](council/personas.py) and shapes-compatible
+  with the others) requires zero changes to the existing five. Each
+  agent reads the space and decides on its own. Composition is
+  emergent, not configured.
 
 ## Layout
 
 ```
-sdk/                     vendored from intent-space-agent-pack
+sdk/                    intent-space SDK (vendored from intent-space-agent-pack)
 council/
-  agent.py               the loop above
-  personas.py            five persona blocks (mira, bex, doro, pria, cass)
-  llm.py                 LLM call helper (shells out to `claude -p`)
-  onboard.py             enroll an agent into commons
-  claim_home.py          request a private home space via the home steward
-  bind_home.py           POST signup-shaped body to the bind_url to bind your key
-  provision_lume.py      from Mira's home, request a shared space + bind all 5
-  connect_home.py        helper to connect_to one's bound home space
-  lume_session.py        helper to connect_to the shared Lume space via invitation
-  runner.py              spawn all 5 agents concurrently against the Lume space
-  duet.py                two-agent warmup that validated the protocol
+  agent.py              the cycle above
+  personas.py           Mira, Bex, Doro, Pria, Cass (and Crier)
+  llm.py                LLM call helper
+  onboard.py            commons enrollment per agent
+  claim_home.py         post a home-space request, follow PROMISE/ACCEPT/COMPLETE
+  bind_home.py          POST to the bind_url to bind your key into the home space
+  provision_lume.py     from Mira's home, request a shared space; harvest invitations
+  connect_home.py       open a session in your bound home space
+  lume_session.py       open a session in the shared Lume space via your invitation
+  runner.py             post a ticket, spawn five agents concurrently against the space
+  duet.py               two-agent protocol smoke test
+  submit.py             post the hackathon-submission intent
 workspaces/
   <agent>/.intent-space/  per-agent identity, enrollment, transcript
 ```
 
-## Running it
+## Run it
 
 ```bash
-# 1. Enroll each agent in commons (one-time)
-for a in mira bex doro pria cass; do python3 council/onboard.py $a; done
-
-# 2. Claim and bind a private home space for each agent
+# one-time, per agent: enroll into commons, claim & bind a private home space
 for a in mira bex doro pria cass; do
-  python3 council/claim_home.py $a && python3 council/bind_home.py $a
+  python3 council/onboard.py     $a
+  python3 council/claim_home.py  $a
+  python3 council/bind_home.py   $a
 done
 
-# 3. From Mira's home, provision the shared "Lume Customer Support" space
+# one-time: provision the shared Lume space + harvest per-participant invitations
 python3 council/provision_lume.py
-# (this also harvests the per-participant invitations and makes them
-# discoverable to lume_session.py — no separate bind step is needed for
-# shared-space invitations; access creds are inline in the invitation INTENT)
 
-# 4. Run the council
-python3 council/runner.py            # posts a fresh ticket and runs 5 cycles
-python3 council/runner.py --no-seed  # reuse the existing ticket
+# the demo: post a ticket and run all five agents
+python3 council/runner.py
+
+# observe live
+open "https://spacebase1.differ.ac/observatory#origin=https%3A%2F%2Fspacebase1.differ.ac&space=space-4e45684f-3604-429d-b20b-bc71833db7be&token=SXmXFjbjKR-0t4n1AsK4S23o2_b4CHW5EvHa4xqwEZM"
 ```
-
-## Why this scores
-
-- **Originality.** The Bex/Cass dissent → reversal is emergent, not
-  scripted. Two agents disagree publicly on the same ticket, and the
-  resolution happens because one of them reads the other's reasoning and
-  changes its mind. There is no arbiter and no shared state besides the
-  tree.
-- **Technical depth.** Five real concurrent agent processes, each with its
-  own RSA keypair, its own commons enrollment, its own home space, and its
-  own station_token bound to the shared Lume space via invitation. Real
-  PROMISE/ACCEPT/COMPLETE round-trip with the home steward to provision
-  the shared space. Real per-cycle LLM calls (Sonnet for response
-  generation; Haiku is used elsewhere in the agent pack). The DECLINE the
-  steward sent the first time we got the request shape wrong — and the
-  fix from `spacePolicy.participants` to
-  `requestedSpace.participant_principals` — was driven by reading the
-  tree, exactly as the protocol intends.
-- **Intent-space native.** Capability is never declared globally. Bex
-  doesn't subscribe to a "billing" topic; she reads the ticket and decides
-  it's hers. The dissent lives **inside the parent ticket's interior**,
-  not in a side channel — the conversation is the work product. Adding a
-  6th agent (e.g. a Town Crier — see `personas.py`) requires zero changes
-  to the existing five.
-- **Demo-ability.** The shared Lume space is the entire demo surface. No
-  UI to break. The narrative reads top-to-bottom in the observatory:
-  complaint → parallel engagement → escalation → dissent → reversal →
-  customer reaction.
-
-## What didn't make it
-
-- Three-level nesting wasn't reliably produced. The intended path was for
-  Doro to post a privacy-escalation **inside** her data-pending-privacy
-  intent's interior, and Pria to approve **inside** Doro's escalation —
-  three levels deep. In practice, Pria sometimes posted the approval as a
-  sibling under the ticket. The fractal nesting model supports it; the
-  persona prompts didn't reliably produce it.
-- Town Crier (the 6th-agent extensibility proof) is defined in
-  `personas.py` but wasn't spun up live during the demo run.
-
-## Onboarding gotcha worth writing down
-
-The home-space steward returns a COMPLETE with a `bind_url` — the
-participant POSTs a signup-shaped body (DPoP proof + ToS signature +
-access token) to that URL to bind their existing key into the new home
-space. The shared-space steward, by contrast, returns invitations whose
-**`access` block is inline** — no separate bind URL, just call
-`connect_to(...)` with the credentials directly.
-
-## Authors
-
-Varun A. — solo entry. Built ~one-shot during the hackathon window.

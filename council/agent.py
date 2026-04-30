@@ -79,17 +79,36 @@ def parse_decision(text: str) -> dict:
     return {"action": "skip", "reasoning": "could not parse LLM output"}
 
 
-def cycle(session: HttpSpaceToolSession, parent_id: str, persona: dict, principal_to_name: dict[str, str]) -> bool:
-    """Run one observe-decide-post cycle. Returns True if something was posted."""
-    full = session.scan_full(parent_id)
+def find_seed_intent(session: HttpSpaceToolSession, intent_id: str, search_space: str) -> dict | None:
+    """The seed intent that created `intent_id` as a space lives in its containing space."""
+    try:
+        scan = session.scan_full(search_space)
+    except Exception:
+        return None
+    for m in scan.get("messages", []):
+        if m.get("type") == "INTENT" and m.get("intentId") == intent_id:
+            return m
+    return None
+
+
+def cycle_on_ticket(session: HttpSpaceToolSession, ticket_id: str, queue_id: str, persona: dict, principal_to_name: dict[str, str]) -> bool:
+    """Consider one ticket: scan its interior, decide, post a reply if engaged."""
+    seed = find_seed_intent(session, ticket_id, queue_id)
+    full = session.scan_full(ticket_id)
     messages = full.get("messages", [])
     tree = render_tree(messages, session.agent_id, principal_to_name)
+    seed_block = ""
+    if seed:
+        seed_who = principal_to_name.get(seed.get("senderId", ""), short_id(seed.get("senderId")))
+        seed_content = (seed.get("payload") or {}).get("content") or ""
+        seed_block = f"TICKET (parent intent, posted by {seed_who}):\n  {seed_content}\n\n"
 
     sender_ids_in_tree = {m.get("senderId") for m in messages}
     you_already_acted = session.agent_id in sender_ids_in_tree
 
+    is_customer = persona.get("role") == "customer"
     other_intents = [m for m in messages if m.get("type") == "INTENT" and m.get("senderId") != session.agent_id]
-    if not other_intents and persona.get("role") != "customer":
+    if not other_intents and not is_customer:
         # Nothing to react to yet, and we're not the seeder.
         return False
 
@@ -114,18 +133,20 @@ def cycle(session: HttpSpaceToolSession, parent_id: str, persona: dict, principa
     )
 
     prompt = (
-        f"VISIBLE PARENT INTENT (this is the customer ticket — its space id is `{parent_id}`):\n"
+        f"{seed_block}"
+        f"REPLIES SO FAR INSIDE THIS TICKET'S SPACE (`{ticket_id}`):\n"
         f"{tree}\n\n"
         f"YOUR PRINCIPAL: {session.agent_id}\n"
-        f"YOU HAVE ALREADY POSTED IN THIS SPACE: {you_already_acted}\n\n"
+        f"YOU HAVE ALREADY POSTED IN THIS TICKET: {you_already_acted}\n\n"
         f"GUIDELINES:\n{persona['guidelines']}\n\n"
-        "Decide: do you want to post a new child intent under this customer ticket, or skip this cycle?\n"
+        f"The ticket id you should usually post under is: {ticket_id}\n"
+        "Decide: do you want to post a new child intent under this ticket, or skip this cycle?\n"
         "Only post if there is something genuinely new to add. If you've already said your piece and nothing new "
         "has happened since, skip. Avoid repeating yourself.\n\n"
         f"{rules}"
     )
 
-    print(f"[{persona['name']}] thinking ({len(messages)} messages visible)…", flush=True)
+    print(f"[{persona['name']}] thinking on {short_id(ticket_id)} ({len(messages)} replies visible)…", flush=True)
     raw = llm_call(prompt, model=persona.get("model", "sonnet"), system=system, timeout=120)
     decision = parse_decision(raw)
     action = decision.get("action", "skip")
@@ -137,12 +158,29 @@ def cycle(session: HttpSpaceToolSession, parent_id: str, persona: dict, principa
     content = decision.get("content")
     if not content:
         return False
-    target = decision.get("parent_intent_id") or parent_id
+    target = decision.get("parent_intent_id") or ticket_id
     payload = {"content": content, "kind": decision.get("kind", persona.get("default_kind", "reply")), "agent": persona["name"]}
     msg = session.intent(content, parent_id=target, payload=payload)
     session.post(msg, step=f"{persona['name']}.post")
     print(f"[{persona['name']}] posted {short_id(msg['intentId'])} under {short_id(target)}", flush=True)
     return True
+
+
+def cycle_on_queue(session: HttpSpaceToolSession, queue_id: str, persona: dict, principal_to_name: dict[str, str]) -> int:
+    """Scan the queue for tickets and consider engaging with each one. Returns count posted."""
+    queue_scan = session.scan_full(queue_id)
+    tickets = [m for m in queue_scan.get("messages", []) if m.get("type") == "INTENT"]
+    posted = 0
+    for ticket in tickets:
+        ticket_id = ticket.get("intentId")
+        if not ticket_id:
+            continue
+        try:
+            if cycle_on_ticket(session, ticket_id, queue_id, persona, principal_to_name):
+                posted += 1
+        except Exception as e:
+            print(f"[{persona['name']}] error on {short_id(ticket_id)}: {e}", flush=True)
+    return posted
 
 
 def build_principal_map() -> dict[str, str]:
@@ -166,7 +204,7 @@ def build_principal_map() -> dict[str, str]:
     return mapping
 
 
-def run_agent(agent_name: str, parent_id: str, cycles: int, sleep: float) -> None:
+def run_agent(agent_name: str, queue_id: str, cycles: int, sleep: float) -> None:
     persona = PERSONAS[agent_name]
     session = HttpSpaceToolSession(
         endpoint=COMMONS_URL,
@@ -177,10 +215,9 @@ def run_agent(agent_name: str, parent_id: str, cycles: int, sleep: float) -> Non
     principal_to_name = build_principal_map()
     for i in range(cycles):
         try:
-            posted = cycle(session, parent_id, persona, principal_to_name)
+            cycle_on_queue(session, queue_id, persona, principal_to_name)
         except Exception as e:
             print(f"[{persona['name']}] cycle error: {e}", flush=True)
-            posted = False
         # Jitter so concurrent agents don't lock-step
         delay = sleep + random.uniform(-0.5, 1.5)
         time.sleep(max(1.0, delay))
@@ -189,11 +226,11 @@ def run_agent(agent_name: str, parent_id: str, cycles: int, sleep: float) -> Non
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("agent_name")
-    p.add_argument("parent_id")
+    p.add_argument("queue_id", help="The Lume Tickets queue space (a top-level intent in commons)")
     p.add_argument("--cycles", type=int, default=4)
     p.add_argument("--sleep", type=float, default=4.0)
     args = p.parse_args()
-    run_agent(args.agent_name, args.parent_id, args.cycles, args.sleep)
+    run_agent(args.agent_name, args.queue_id, args.cycles, args.sleep)
 
 
 if __name__ == "__main__":

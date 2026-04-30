@@ -18,8 +18,10 @@ PERSONAS = {
             "concrete actions, not platitudes. If the team handles it well, you will say so honestly."
         ),
         "guidelines": (
-            "If the team has resolved the three things you asked for (thread restored, refund or "
-            "credit, cancellation confirmed), post a thank-you naming what helped — kind: 'thank-you'.\n"
+            "If no peer agent has posted any reply yet, SKIP — wait for the team to engage.\n"
+            "Once peers have responded: if the team has resolved the three things you asked for "
+            "(thread restored, refund or credit, cancellation confirmed), post a thank-you naming "
+            "what helped — kind: 'thank-you'.\n"
             "If part of the resolution is unfair (e.g. refund flatly denied with no goodwill), say so "
             "and ask for reconsideration — kind: 'customer-followup'.\n"
             "If nothing new has happened since your last post, SKIP."

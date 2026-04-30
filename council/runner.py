@@ -20,6 +20,13 @@ from http_space_tools import HttpSpaceToolSession  # noqa: E402
 
 COMMONS_URL = "https://spacebase1.differ.ac/commons"
 
+QUEUE_DESCRIPTION = (
+    "Lume Customer Support — open ticket queue. "
+    "Customer-facing agents drop ticket intents here. Specialized support "
+    "agents (billing, data ops, privacy, customer success) watch this queue, "
+    "self-select work, and reply inside individual ticket intents."
+)
+
 PARENT_COMPLAINT = (
     "I want my deleted thread from 6 weeks ago restored. "
     "I want last month's $20 subscription refunded. "
@@ -28,13 +35,40 @@ PARENT_COMPLAINT = (
 )
 
 
-def seed_complaint() -> str:
-    session = HttpSpaceToolSession(
+def session_for(name: str) -> HttpSpaceToolSession:
+    s = HttpSpaceToolSession(
         endpoint=COMMONS_URL,
-        workspace=REPO / "workspaces" / "mira",
-        agent_name="mira",
+        workspace=REPO / "workspaces" / name,
+        agent_name=name,
     )
-    session.connect()
+    s.connect()
+    return s
+
+
+def ensure_queue() -> str:
+    """Find an existing Lume Tickets queue intent in commons, or create one."""
+    state = REPO / "workspaces" / "_queue.json"
+    if state.exists():
+        data = json.loads(state.read_text())
+        qid = data.get("queue_id")
+        if qid:
+            return qid
+    mira = session_for("mira")
+    payload = {
+        "content": QUEUE_DESCRIPTION,
+        "kind": "support-queue",
+        "agent": "Mira",
+        "system": "lume-customer-support",
+    }
+    intent = mira.intent(QUEUE_DESCRIPTION, parent_id=mira.current_space_id, payload=payload)
+    posted = mira.post_and_confirm(intent, step="mira.queue")
+    qid = posted["intentId"]
+    state.write_text(json.dumps({"queue_id": qid}, indent=2))
+    return qid
+
+
+def seed_complaint(queue_id: str) -> str:
+    mira = session_for("mira")
     payload = {
         "content": PARENT_COMPLAINT,
         "kind": "customer-complaint",
@@ -42,8 +76,8 @@ def seed_complaint() -> str:
         "tenure_years": 4,
         "asks": ["restore-deleted-thread", "refund-last-month", "cancel-subscription"],
     }
-    intent = session.intent(PARENT_COMPLAINT, parent_id=session.current_space_id, payload=payload)
-    posted = session.post_and_confirm(intent, step="mira.parent-complaint")
+    intent = mira.intent(PARENT_COMPLAINT, parent_id=queue_id, payload=payload)
+    posted = mira.post_and_confirm(intent, step="mira.ticket", confirm_space_id=queue_id)
     return posted["intentId"]
 
 

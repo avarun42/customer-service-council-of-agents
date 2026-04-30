@@ -26,9 +26,8 @@ sys.path.insert(0, str(REPO / "council"))
 from http_space_tools import HttpSpaceToolSession  # noqa: E402
 
 from llm import call as llm_call  # noqa: E402
+from lume_session import lume_session  # noqa: E402
 from personas import PERSONAS  # noqa: E402
-
-COMMONS_URL = "https://spacebase1.differ.ac/commons"
 
 
 def short_id(s: str | None) -> str:
@@ -106,10 +105,16 @@ def cycle_on_ticket(session: HttpSpaceToolSession, ticket_id: str, queue_id: str
     sender_ids_in_tree = {m.get("senderId") for m in messages}
     you_already_acted = session.agent_id in sender_ids_in_tree
 
-    is_customer = persona.get("role") == "customer"
-    other_intents = [m for m in messages if m.get("type") == "INTENT" and m.get("senderId") != session.agent_id]
-    if not other_intents and not is_customer:
-        # Nothing to react to yet, and we're not the seeder.
+    # Skip only if you've already posted here AND nothing has happened since.
+    # We can't cheaply detect "since" — instead let the LLM decide. The
+    # cycle limit caps any waste from over-engagement.
+    if not seed:
+        # Without a seed we have no idea what this ticket is about.
+        return False
+    seed_payload = (seed.get("payload") or {})
+    seed_kind = seed_payload.get("kind", "")
+    if persona.get("role") != "customer" and seed_kind not in ("customer-complaint", "support-ticket", ""):
+        # Skip steward presence intents and other non-ticket nodes.
         return False
 
     system = (
@@ -184,7 +189,12 @@ def cycle_on_queue(session: HttpSpaceToolSession, queue_id: str, persona: dict, 
 
 
 def build_principal_map() -> dict[str, str]:
-    """Read each workspace's enrollment file to build principal_id -> friendly name."""
+    """Read each workspace's enrollment files to build principal_id -> friendly name.
+
+    We map BOTH the commons principal and the home-space principal so the LLM
+    sees friendly names for any sender id that appears in scans, regardless of
+    which audience the agent is currently bound to.
+    """
     mapping: dict[str, str] = {}
     ws_dir = REPO / "workspaces"
     if not ws_dir.exists():
@@ -192,26 +202,22 @@ def build_principal_map() -> dict[str, str]:
     for d in ws_dir.iterdir():
         if not d.is_dir():
             continue
-        enrollment = d / ".intent-space" / "state" / "station-enrollment.json"
-        if enrollment.exists():
-            try:
-                data = json.loads(enrollment.read_text())
-                pid = data.get("principal_id")
-                if pid:
-                    mapping[pid] = d.name
-            except Exception:
-                pass
+        for fname in ("station-enrollment.json", "home-enrollment.json"):
+            enrollment = d / ".intent-space" / "state" / fname
+            if enrollment.exists():
+                try:
+                    data = json.loads(enrollment.read_text())
+                    pid = data.get("principal_id")
+                    if pid:
+                        mapping[pid] = d.name
+                except Exception:
+                    pass
     return mapping
 
 
 def run_agent(agent_name: str, queue_id: str, cycles: int, sleep: float) -> None:
     persona = PERSONAS[agent_name]
-    session = HttpSpaceToolSession(
-        endpoint=COMMONS_URL,
-        workspace=REPO / "workspaces" / agent_name,
-        agent_name=agent_name,
-    )
-    session.connect()
+    session = lume_session(agent_name)
     principal_to_name = build_principal_map()
     for i in range(cycles):
         try:

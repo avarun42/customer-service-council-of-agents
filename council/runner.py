@@ -15,17 +15,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "sdk"))
+sys.path.insert(0, str(REPO / "council"))
 
-from http_space_tools import HttpSpaceToolSession  # noqa: E402
-
-COMMONS_URL = "https://spacebase1.differ.ac/commons"
-
-QUEUE_DESCRIPTION = (
-    "Lume Customer Support — open ticket queue. "
-    "Customer-facing agents drop ticket intents here. Specialized support "
-    "agents (billing, data ops, privacy, customer success) watch this queue, "
-    "self-select work, and reply inside individual ticket intents."
-)
+from lume_session import LUME_SPACE_ID, lume_session  # noqa: E402
 
 PARENT_COMPLAINT = (
     "I want my deleted thread from 6 weeks ago restored. "
@@ -35,40 +27,9 @@ PARENT_COMPLAINT = (
 )
 
 
-def session_for(name: str) -> HttpSpaceToolSession:
-    s = HttpSpaceToolSession(
-        endpoint=COMMONS_URL,
-        workspace=REPO / "workspaces" / name,
-        agent_name=name,
-    )
-    s.connect()
-    return s
-
-
-def ensure_queue() -> str:
-    """Find an existing Lume Tickets queue intent in commons, or create one."""
-    state = REPO / "workspaces" / "_queue.json"
-    if state.exists():
-        data = json.loads(state.read_text())
-        qid = data.get("queue_id")
-        if qid:
-            return qid
-    mira = session_for("mira")
-    payload = {
-        "content": QUEUE_DESCRIPTION,
-        "kind": "support-queue",
-        "agent": "Mira",
-        "system": "lume-customer-support",
-    }
-    intent = mira.intent(QUEUE_DESCRIPTION, parent_id=mira.current_space_id, payload=payload)
-    posted = mira.post_and_confirm(intent, step="mira.queue")
-    qid = posted["intentId"]
-    state.write_text(json.dumps({"queue_id": qid}, indent=2))
-    return qid
-
-
-def seed_complaint(queue_id: str) -> str:
-    mira = session_for("mira")
+def seed_complaint() -> str:
+    """Mira posts a ticket as a top-level INTENT inside the shared Lume space."""
+    mira = lume_session("mira")
     payload = {
         "content": PARENT_COMPLAINT,
         "kind": "customer-complaint",
@@ -76,8 +37,8 @@ def seed_complaint(queue_id: str) -> str:
         "tenure_years": 4,
         "asks": ["restore-deleted-thread", "refund-last-month", "cancel-subscription"],
     }
-    intent = mira.intent(PARENT_COMPLAINT, parent_id=queue_id, payload=payload)
-    posted = mira.post_and_confirm(intent, step="mira.ticket", confirm_space_id=queue_id)
+    intent = mira.intent(PARENT_COMPLAINT, parent_id=LUME_SPACE_ID, payload=payload)
+    posted = mira.post_and_confirm(intent, step="mira.ticket", confirm_space_id=LUME_SPACE_ID)
     return posted["intentId"]
 
 
@@ -97,15 +58,12 @@ def main() -> None:
     p.add_argument("--agents", default="mira,bex,doro,pria,cass")
     p.add_argument("--cycles", type=int, default=5)
     p.add_argument("--sleep", type=float, default=4.0)
-    p.add_argument("--parent-id", default=None, help="Reuse an existing parent intent")
+    p.add_argument("--no-seed", action="store_true", help="Don't post a new ticket — agents just scan the existing Lume space")
     args = p.parse_args()
 
-    if args.parent_id:
-        parent_id = args.parent_id
-        print(f"reusing existing parent: {parent_id}")
-    else:
-        parent_id = seed_complaint()
-        print(f"posted parent complaint: {parent_id}")
+    if not args.no_seed:
+        ticket_id = seed_complaint()
+        print(f"posted ticket inside Lume space: {ticket_id}")
 
     log_dir = REPO / "workspaces" / "_logs"
     procs = {}
@@ -113,19 +71,15 @@ def main() -> None:
         name = name.strip()
         if not name:
             continue
-        procs[name] = spawn_agent(name, parent_id, args.cycles, args.sleep, log_dir)
+        procs[name] = spawn_agent(name, LUME_SPACE_ID, args.cycles, args.sleep, log_dir)
         time.sleep(0.5)  # mild stagger so they don't all hit the API at once
 
-    print(f"\nrunning {len(procs)} agents against {parent_id}…")
-    print(f"watch live: https://spacebase1.differ.ac/?space={parent_id}")
+    print(f"\nrunning {len(procs)} agents against shared Lume space {LUME_SPACE_ID}…")
     print(f"logs: {log_dir}")
 
     for name, p in procs.items():
         p.wait()
         print(f"[{name}] exited with {p.returncode}")
-
-    state = {"parent_id": parent_id}
-    (REPO / "workspaces" / "_state.json").write_text(json.dumps(state, indent=2))
 
 
 if __name__ == "__main__":

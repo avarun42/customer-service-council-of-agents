@@ -81,11 +81,11 @@ def main() -> None:
             "tickets and specialized support agents (Billing, Data Ops, "
             "Privacy, Customer Success) self-select work."
         ),
-        "requestedSpace": {"kind": "shared"},
-        "spacePolicy": {
-            "visibility": "private",
-            "participants": list(principals.values()),
+        "requestedSpace": {
+            "kind": "shared",
+            "participant_principals": list(principals.values()),
         },
+        "spacePolicy": {"visibility": "private"},
     }
     request = mira.intent(
         request_payload["content"],
@@ -146,6 +146,8 @@ def wait_for(session, space_id: str, kind: str, timeout: float):
     while time.time() < deadline:
         scan = session.scan_full(space_id)
         for m in scan.get("messages", []):
+            if m.get("type") == "DECLINE":
+                raise RuntimeError(f"steward DECLINE: {(m.get('payload') or {}).get('reason')!r}")
             if m.get("type") == kind:
                 return m
         time.sleep(1.5)

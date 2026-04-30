@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:spacebase1.differ.ac)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:hack.memetic.software)",
+      "Bash(python3 council/onboard.py bex)",
+      "Bash(python3 council/onboard.py doro)",
+      "Bash(python3 council/onboard.py pria)",
+      "Bash(python3 council/onboard.py cass)",
+      "Bash(python3 council/onboard.py duet1)",
+      "Bash(python3 council/onboard.py duet2)"
+    ]
+  }
+}

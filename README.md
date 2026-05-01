@@ -186,25 +186,163 @@ because:
   agent reads the space and decides on its own. Composition is
   emergent, not configured.
 
+## Comparison: orchestrator vs. intent-space council
+
+A side-by-side of how the same ticket resolution would play out.
+
+| concern | triage-then-dispatch orchestrator | intent-space council |
+|---|---|---|
+| where work is "assigned" | router classifier splits into sub-tickets | nowhere; agents self-select by reading the ticket |
+| where reasoning lives | tags, custom fields, separate audit logs | the intent's `payload.content`, in plain English |
+| how dispute is expressed | escalate workflow / appeal queue | sibling INTENT under the same ticket |
+| how reversal is recorded | state transition on the original record | new INTENT that supersedes the old one (append-only) |
+| auditability | reconstruct from multiple records across queues | read the tree top-to-bottom |
+| extensibility (new agent) | router config + new queue + handler code | new persona block in `council/personas/`, add name to `--agents` |
+
+On the orchestrator, Cass would need a dedicated "appeal" workflow to
+dispute Bex's refund denial. Bex would see an approval-request
+notification, not Cass's actual reasoning. The reversal would be a state
+transition on a sub-ticket, not a readable argument in the conversation.
+
+On intent space, it's just three INTENTs with stated reasoning, posted
+by independent agents reading the same shared tree. The conversation
+**is** the resolution.
+
+## The five personas
+
+Each agent runs the same loop with a different persona block. The
+persona is the **only** authored content that changes behavior.
+
+### Mira — customer intake
+
+A synthetic customer agent representing a 4-year paying Lume user.
+Posts the initial ticket. Reacts to the team's resolution honestly —
+thanks when handled well, pushes back when something is unfair. Waits
+for peer agents to engage before responding (no monologuing).
+
+### Bex — billing & subscriptions
+
+Strict ToS enforcer. Handles cancellations and refund decisions. Her
+persona explicitly **permits reconsideration** when a peer's reasoning
+is sound — the single sentence that makes the dissent → reversal
+possible. Posts separate intents for each action (cancellation vs.
+refund denial) so each is its own space.
+
+### Doro — data operations
+
+Handles thread retention, deletion, and recovery. Won't restore until
+privacy approves — she escalates, waits for Pria, then confirms. This
+produces a small workflow inside the ticket without any orchestrator.
+
+### Pria — privacy reviewer
+
+Decides whether sensitive data operations may proceed. Weighs tenure,
+request specificity, and risk surface. Writes short, careful decisions
+with explicit criteria. Posts approval + mock restored-thread URL.
+
+### Cass — customer success / retention
+
+The **dissent agent.** Reads the ENTIRE conversation including peer
+agents' posts. Willing to publicly disagree when a decision creates
+retention risk. Posts concrete alternatives (e.g. $10 goodwill credit),
+references the peer agent by name, and explains the trade-off. The
+reversal in the demo is a direct result of Cass's counter-proposal.
+
+### Crier — town crier (6th agent, extensibility proof)
+
+Defined in `council/personas/crier.py`. Posts periodic compact
+summaries. Adding it to `--agents` requires **zero changes** to any
+other agent's code. The space doesn't care how many agents participate.
+
+## Steward-driven provisioning detail
+
+The shared Lume space wasn't created by API call. It was provisioned
+through the protocol's own promise lifecycle:
+
+```
+mira (in her private home space)
+  → INTENT { requestedSpace: { kind: "shared", participant_principals: [5 ids] } }
+      ← steward PROMISE "I will provision one shared space for 5 peers"
+  → ACCEPT
+      ← steward COMPLETE { shared_space_id, invitation_count: 5 }
+         + fan-out: one INTENT per participant, delivered into THEIR
+           private home space, carrying the full access block inline:
+           { station_token, audience, itp_endpoint, scan_endpoint, stream_endpoint }
+```
+
+The first attempt used `spacePolicy.participants` (wrong field). The
+steward returned a DECLINE with the reason:
+`"home-space steward needs requestedSpace.participant_principals as an
+array of principal ids."` — machine-readable error semantics, the
+protocol working as designed. The fix was obvious from the tree.
+
+Two distinct invitation patterns in the same demo:
+
+- **Home spaces:** steward COMPLETE returns `bind_url` + `claim_token`.
+  Agent POSTs a signup-shaped body to bind its existing RSA key into the
+  new audience. (`council/bind_home.py`)
+- **Shared spaces:** steward delivers invitation INTENTs into each
+  participant's home space with the `access:` block **inline** — no
+  separate bind step. (`council/lume_session.py`)
+
+## Video walkthrough
+
+The live demo is itself the video — the observatory at spacebase1
+streams framed acts as they happen. Open the observatory URL above,
+click into the customer ticket, and read the 11 replies top-down. The
+dissent → reversal plays out at replies #7, #10, #11.
+
+A frozen transcript of the full conversation with every agent's
+complete reasoning is at
+[`demo/transcripts/ticket-transcript.md`](demo/transcripts/ticket-transcript.md).
+
+A 60-second demo script for screensharing is at
+[`demo/walkthrough.md`](demo/walkthrough.md).
+
 ## Layout
 
 ```
-sdk/                    intent-space SDK (vendored from intent-space-agent-pack)
+sdk/                         intent-space SDK (vendored from intent-space-agent-pack)
 council/
-  agent.py              the cycle above
-  personas.py           Mira, Bex, Doro, Pria, Cass (and Crier)
-  llm.py                LLM call helper
-  onboard.py            commons enrollment per agent
-  claim_home.py         post a home-space request, follow PROMISE/ACCEPT/COMPLETE
-  bind_home.py          POST to the bind_url to bind your key into the home space
-  provision_lume.py     from Mira's home, request a shared space; harvest invitations
-  connect_home.py       open a session in your bound home space
-  lume_session.py       open a session in the shared Lume space via your invitation
-  runner.py             post a ticket, spawn five agents concurrently against the space
-  duet.py               two-agent protocol smoke test
-  submit.py             post the hackathon-submission intent
+  agent.py                   the scan/decide/post loop
+  agent_commons.py           commons-bound variant for the golden demo
+  personas/                  one file per persona (mira, bex, doro, pria, cass, crier)
+  lib/                       reusable helpers (tree renderer, decision parser, id formatter)
+  llm.py                     LLM call helper (shells out to claude CLI)
+  onboard.py                 commons enrollment per agent
+  claim_home.py              request a private home space via PROMISE/ACCEPT/COMPLETE
+  bind_home.py               POST signup-shaped body to bind_url
+  provision_lume.py          request shared space + harvest invitations
+  connect_home.py            connect_to one's bound home space
+  lume_session.py            connect_to the shared Lume space via invitation
+  commons_session.py         connect_to commons via enrollment
+  runner.py                  spawn 5 agents against the shared Lume space
+  runner_commons.py          spawn 5 agents against commons (golden demo)
+  observe.py                 pretty-print the Lume tree from CLI
+  health.py                  verify local state is consistent
+  duet.py                    two-agent protocol smoke test
+  submit.py                  post the hackathon-submission intent
+  post_demo_pointer.py       post a demo-pointer inside the submission
+docs/
+  ARCHITECTURE.md            process model, auth, provisioning, agent loop
+  DISSENT_LOOP.md            the headline behavior in detail
+  PROTOCOL_PRIMER.md         the three verbs and frame types
+  AGENT_LIFECYCLE.md         from "no identity" to "actively reasoning"
+  PERSONA_DESIGN.md          why personas instead of capability tags
+  STEWARD_PROVISIONING.md    home + shared space steward flows
+  WHY_INTENT_SPACE.md        vs queue / pub-sub / workflow engine
+  COMPARISON.md              side-by-side: orchestrator vs intent-space council
+  DEMO_GUIDE.md              how to run + reproduce the demo
+  VIDEO.md                   live video walkthrough URL + viewing notes
+  WALKTHROUGH.md             90-second observatory tour
+  INDEX.md                   docs index
+demo/
+  transcripts/               frozen ticket transcript with all 11 replies
+  walkthrough.md             60-second demo script for screensharing
+  script.md                  reproducible demo script with verification
+  screenshots/               screenshot descriptions for static docs
 workspaces/
-  <agent>/.intent-space/  per-agent identity, enrollment, transcript
+  <agent>/.intent-space/     per-agent identity, enrollment, transcript
 ```
 
 ## Run it
@@ -223,6 +361,15 @@ python3 council/provision_lume.py
 # the demo: post a ticket and run all five agents
 python3 council/runner.py
 
+# or: golden demo in commons
+python3 council/runner_commons.py
+
 # observe live
 open "https://spacebase1.differ.ac/observatory#origin=https%3A%2F%2Fspacebase1.differ.ac&space=space-4e45684f-3604-429d-b20b-bc71833db7be&token=SXmXFjbjKR-0t4n1AsK4S23o2_b4CHW5EvHa4xqwEZM"
+
+# observe from CLI
+python3 council/observe.py
+
+# health check
+python3 council/health.py
 ```

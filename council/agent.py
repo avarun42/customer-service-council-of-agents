@@ -172,7 +172,7 @@ def cycle_on_ticket(session: HttpSpaceToolSession, ticket_id: str, queue_id: str
     return True
 
 
-TICKET_KINDS = {"customer-complaint", "support-ticket", ""}
+TICKET_KINDS = {"customer-complaint", "support-ticket"}
 
 
 def cycle_on_queue(session: HttpSpaceToolSession, queue_id: str, persona: dict, principal_to_name: dict[str, str]) -> int:

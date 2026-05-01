@@ -19,3 +19,6 @@ ALL_PERSONAS = {
     "cass": CASS,
     "crier": CRIER,
 }
+
+# Backwards-compatible alias used by agent.py.
+PERSONAS = ALL_PERSONAS

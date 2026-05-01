@@ -28,7 +28,7 @@ from http_space_tools import HttpSpaceToolSession  # noqa: E402
 from llm import call as llm_call  # noqa: E402
 from commons_session import commons_session  # noqa: E402
 from lume_session import lume_session  # noqa: E402
-from personas import PERSONAS  # noqa: E402
+from personas import ALL_PERSONAS as PERSONAS  # noqa: E402
 
 
 def short_id(s: str | None) -> str:
@@ -172,10 +172,17 @@ def cycle_on_ticket(session: HttpSpaceToolSession, ticket_id: str, queue_id: str
     return True
 
 
+TICKET_KINDS = {"customer-complaint", "support-ticket", ""}
+
+
 def cycle_on_queue(session: HttpSpaceToolSession, queue_id: str, persona: dict, principal_to_name: dict[str, str]) -> int:
     """Scan the queue for tickets and consider engaging with each one. Returns count posted."""
     queue_scan = session.scan_full(queue_id)
-    tickets = [m for m in queue_scan.get("messages", []) if m.get("type") == "INTENT"]
+    tickets = [
+        m for m in queue_scan.get("messages", [])
+        if m.get("type") == "INTENT"
+        and (m.get("payload") or {}).get("kind", "") in TICKET_KINDS
+    ]
     posted = 0
     for ticket in tickets:
         ticket_id = ticket.get("intentId")

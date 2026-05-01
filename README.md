@@ -1,10 +1,17 @@
 # Customer Council
 
-Five autonomous agents running a customer-support ticket queue on
-[spacebase1.differ.ac](https://spacebase1.differ.ac), coordinating
+**Live demo:** five autonomous agents resolving customer-support tickets
+on [spacebase1.differ.ac](https://spacebase1.differ.ac), coordinating
 exclusively through the intent-space protocol — append-only writes into
 a shared space, no orchestrator, no router, no topic subscriptions, no
 shared memory.
+
+**Watch the demo run:**
+[live observatory walkthrough](https://spacebase1.differ.ac/observatory#origin=https%3A%2F%2Fspacebase1.differ.ac&space=space-4e45684f-3604-429d-b20b-bc71833db7be&token=SXmXFjbjKR-0t4n1AsK4S23o2_b4CHW5EvHa4xqwEZM)
+— click into the customer ticket to see all 11 replies and the dissent
+loop unfold.
+
+**Demo agent principal:** `prn_spacebase1_commons_rfbd2ih2f0usxly1y1oldy20` (Mira)
 
 ## The novel behavior
 
@@ -32,20 +39,32 @@ retention objection, reconsider." The whole behavior is an emergent
 property of the persona prompts plus shared visibility plus the
 intent-space append-only model.
 
-## Observe it
+## Demo & walkthrough
 
-**The shared Lume Customer Support space (the demo surface):**
+**Live demo space (the Lume Customer Support shared space):**
 
 https://spacebase1.differ.ac/observatory#origin=https%3A%2F%2Fspacebase1.differ.ac&space=space-4e45684f-3604-429d-b20b-bc71833db7be&token=SXmXFjbjKR-0t4n1AsK4S23o2_b4CHW5EvHa4xqwEZM
 
-Inside that space:
+This is the actual demo running on Spacebase1. Open it and you see:
 
 - one top-level INTENT — the customer ticket
-- 11 child intents inside the ticket (every reply is itself a space)
-- the dissent → reversal occurs in the last three child intents
+- 11 child intents inside the ticket (every reply is itself a space — click into them)
+- the dissent → reversal plays out across replies #7, #10, and #11
 
-Hackathon submission intent: `intent-136eaac9-bc6d-4afc-b4d2-ba319ac04096`
-(under `intent-413e0bc5-d8f3-40e7-afb4-350e220df03c` in commons).
+**Demo agent principals (all five run as separate processes with their
+own RSA keys):**
+
+- Mira (customer intake): `prn_spacebase1_commons_rfbd2ih2f0usxly1y1oldy20`
+- Bex (billing): `prn_spacebase1_commons_nz26nhmfc3ngw5bewilbwabc`
+- Doro (data ops): `prn_spacebase1_commons_wsbdrt4q4lbzmuggrxttjjs5`
+- Pria (privacy): `prn_spacebase1_commons_tc5bi8k9kjq2bxmxqbkt8nz4`
+- Cass (customer success): `prn_spacebase1_commons_vxqynfpsywwthszvhagfdryh`
+
+Their commons enrollments (and the intents each posted) are visible by
+scanning commons, parent intent
+`intent-413e0bc5-d8f3-40e7-afb4-350e220df03c` for the submission, and
+the Lume shared space (`space-4e45684f-3604-429d-b20b-bc71833db7be`)
+for the actual demo activity.
 
 ## The conversation
 

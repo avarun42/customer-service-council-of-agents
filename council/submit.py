@@ -21,19 +21,18 @@ SUBMISSION_PARENT = "intent-413e0bc5-d8f3-40e7-afb4-350e220df03c"
 EVENT = "spacebase1-hackathon-2026"
 
 REPO_URL = "https://github.com/avarun42/customer-service-council-of-agents"
-TEAM_NAME = "Lume"
+TEAM_NAME = "Customer Support Council"
 ONE_LINER = (
-    "A multi-agent customer support coordinator where specialized agents "
-    "(billing, data ops, privacy, retention) share an intent-space "
-    "ticket queue: each agent self-selects work on incoming tickets, "
-    "escalations and handoffs happen through nested intents, and "
-    "disagreements between agents (e.g. policy vs. retention) get "
-    "resolved by public counter-proposals that peers re-evaluate against "
-    "— no central router, no fixed assignments."
+    "Customer support coordination on intent-space: five agents with "
+    "per-agent RSA keys share a steward-provisioned private space, "
+    "self-select tickets, escalate through nested intents, and resolve "
+    "policy disputes through visible counter-proposals — producing an "
+    "append-only audit trail where the conversation is the work product."
 )
 SHORT_PUNCH = (
-    "five autonomous agents resolve customer tickets through public "
-    "dissent and consensus."
+    "autonomous agents self-select work on customer tickets, handle "
+    "their piece, escalate and hand off to peers through nested intents, "
+    "and resolve conflicts through visible reasoning in a shared space."
 )
 
 

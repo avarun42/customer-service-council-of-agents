@@ -9,7 +9,10 @@
       "Bash(python3 council/onboard.py pria)",
       "Bash(python3 council/onboard.py cass)",
       "Bash(python3 council/onboard.py duet1)",
-      "Bash(python3 council/onboard.py duet2)"
+      "Bash(python3 council/onboard.py duet2)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }

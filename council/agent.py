@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO / "council"))
 from http_space_tools import HttpSpaceToolSession  # noqa: E402
 
 from llm import call as llm_call  # noqa: E402
+from commons_session import commons_session  # noqa: E402
 from lume_session import lume_session  # noqa: E402
 from personas import PERSONAS  # noqa: E402
 
@@ -215,9 +216,9 @@ def build_principal_map() -> dict[str, str]:
     return mapping
 
 
-def run_agent(agent_name: str, queue_id: str, cycles: int, sleep: float) -> None:
+def run_agent(agent_name: str, queue_id: str, cycles: int, sleep: float, use_commons: bool = False) -> None:
     persona = PERSONAS[agent_name]
-    session = lume_session(agent_name)
+    session = commons_session(agent_name) if use_commons else lume_session(agent_name)
     principal_to_name = build_principal_map()
     for i in range(cycles):
         try:
@@ -235,8 +236,9 @@ def main() -> None:
     p.add_argument("queue_id", help="The Lume Tickets queue space (a top-level intent in commons)")
     p.add_argument("--cycles", type=int, default=4)
     p.add_argument("--sleep", type=float, default=4.0)
+    p.add_argument("--commons", action="store_true", help="Use commons enrollment instead of Lume invitation")
     args = p.parse_args()
-    run_agent(args.agent_name, args.queue_id, args.cycles, args.sleep)
+    run_agent(args.agent_name, args.queue_id, args.cycles, args.sleep, use_commons=args.commons)
 
 
 if __name__ == "__main__":
